@@ -2,30 +2,35 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { Moon, Sun, MapPin } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 import PostcodeSearch from '@/components/PostcodeSearch';
 import AreaHeader from '@/components/AreaHeader';
 import ScorePanel from '@/components/ScorePanel';
 import InsightsPanel from '@/components/InsightsPanel';
-import { PostcodeData, AmenityPoint, CrimePoint, FilterState } from '@/lib/types';
-import { Scores } from '@/lib/types';
+import VibeSearch from '@/components/VibeSearch';
+import VibeResultsPanel from '@/components/VibeResultsPanel';
+import { PostcodeData, AmenityPoint, CrimePoint, FilterState, Scores } from '@/lib/types';
 import { countAmenities, computeScores } from '@/lib/scoring';
 import { generateInsights } from '@/lib/insights';
-import { generateMockCrimes } from '@/lib/mockData';
 import { haversineDistance } from '@/lib/utils';
 import { RADIUS_METERS, OUTCODE_RADIUS_METERS } from '@/lib/constants';
+import { OSM_TAG_MAP } from '@/lib/osmTagMap';
+import {
+  buildTagResults,
+  computeVibeScore,
+  ruleBasedPivots,
+  type VibeResult,
+  type RawVibeFeature,
+} from '@/lib/vibeScoring';
 
-// Dynamic import — Leaflet is browser-only
 const MapView = dynamic(() => import('@/components/MapView'), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full flex items-center justify-center" style={{ background: '#1a1d27' }}>
+    <div className="w-full h-full flex items-center justify-center" style={{ background: '#e8ecf0' }}>
       <div className="flex flex-col items-center gap-3">
-        <div
-          className="w-8 h-8 rounded-full border-2 animate-spin"
-          style={{ borderColor: '#3B82F6', borderTopColor: 'transparent' }}
-        />
-        <p className="text-sm" style={{ color: '#5a6285' }}>Loading map…</p>
+        <div className="w-8 h-8 rounded-full border-2 animate-spin"
+          style={{ borderColor: '#3B82F6', borderTopColor: 'transparent' }} />
+        <p className="text-sm" style={{ color: '#9ca3af' }}>Loading map…</p>
       </div>
     </div>
   ),
@@ -37,6 +42,7 @@ interface OSMNode {
   lon?: number;
   center?: { lat: number; lon: number };
   tags?: Record<string, string>;
+  _vibeTag?: string;
 }
 
 function parseOSMAmenities(
@@ -71,10 +77,8 @@ function parseOSMAmenities(
     else if (tags.amenity === 'college') type = 'college';
     else if (tags.amenity === 'university') type = 'university';
     else if (
-      tags.railway === 'station' ||
-      tags.railway === 'halt' ||
-      tags.station === 'subway' ||
-      tags.railway === 'tram_stop'
+      tags.railway === 'station' || tags.railway === 'halt' ||
+      tags.station === 'subway' || tags.railway === 'tram_stop'
     ) {
       type = tags.station === 'subway' ? 'subway' : 'station';
       category = 'transport';
@@ -83,7 +87,6 @@ function parseOSMAmenities(
 
     if (!type) continue;
 
-    // Deduplicate by name+type for ways that share a node
     const key = `${type}::${name || `${lat.toFixed(5)},${lon.toFixed(5)}`}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -97,8 +100,9 @@ function parseOSMAmenities(
   return results;
 }
 
+type RightTab = 'insights' | 'vibe';
+
 export default function HomePage() {
-  const [isDark, setIsDark] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [postcodeData, setPostcodeData] = useState<PostcodeData | null>(null);
   const [amenities, setAmenities] = useState<AmenityPoint[]>([]);
@@ -106,6 +110,14 @@ export default function HomePage() {
   const [scores, setScores] = useState<Scores | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [activeRadius, setActiveRadius] = useState(RADIUS_METERS);
+
+  const [vibeLoading, setVibeLoading] = useState(false);
+  const [vibeExtractedTags, setVibeExtractedTags] = useState<string[]>([]);
+  const [vibeResult, setVibeResult] = useState<VibeResult | null>(null);
+  const [vibeText, setVibeText] = useState('');
+  const [vibeMatchTags, setVibeMatchTags] = useState<Set<string>>(new Set());
+  const [vibeAmenities, setVibeAmenities] = useState<RawVibeFeature[]>([]);
+  const [rightTab, setRightTab] = useState<RightTab>('insights');
 
   const [filters, setFilters] = useState<FilterState>({
     transport: true,
@@ -117,12 +129,12 @@ export default function HomePage() {
     setFilters((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  // ── Postcode search ──────────────────────────────────────────────────────
   const handleSearch = useCallback(async (postcode: string) => {
     setIsLoading(true);
     setErrorMessage('');
 
     try {
-      // 1. Resolve postcode / outcode → lat+lng
       const pcRes = await fetch(`/api/postcode?postcode=${encodeURIComponent(postcode)}`);
       const pcData = await pcRes.json();
 
@@ -134,23 +146,23 @@ export default function HomePage() {
 
       const pd: PostcodeData = pcData;
       setPostcodeData(pd);
-
       const radius = pd.isOutcode ? OUTCODE_RADIUS_METERS : RADIUS_METERS;
       setActiveRadius(radius);
 
-      // 2. Fetch real OSM data — only fall back to mock on a genuine error
       let parsedAmenities: AmenityPoint[] = [];
-
       try {
         const osmRes = await fetch(
           `/api/overpass?lat=${pd.latitude}&lon=${pd.longitude}&radius=${radius}`
         );
-
         if (osmRes.ok) {
           const osmData = await osmRes.json();
-          parsedAmenities = parseOSMAmenities(osmData.elements ?? [], pd.latitude, pd.longitude, radius);
+          parsedAmenities = parseOSMAmenities(
+            osmData.elements ?? [],
+            pd.latitude,
+            pd.longitude,
+            radius
+          );
         } else {
-          // API error — use mocks so the app isn't empty
           const { generateMockAmenities } = await import('@/lib/mockData');
           parsedAmenities = generateMockAmenities(postcode, pd.latitude, pd.longitude);
         }
@@ -159,15 +171,26 @@ export default function HomePage() {
         parsedAmenities = generateMockAmenities(postcode, pd.latitude, pd.longitude);
       }
 
-      // 3. Generate mock crime data (always)
-      const mockCrimes = generateMockCrimes(postcode, pd.latitude, pd.longitude);
+      let parsedCrimes: CrimePoint[] = [];
+      try {
+        const crimesRes = await fetch(
+          `/api/crimes?lat=${pd.latitude}&lon=${pd.longitude}&radius=${radius}`
+        );
+        if (crimesRes.ok) {
+          const crimesData = await crimesRes.json();
+          parsedCrimes = crimesData.crimes ?? [];
+        }
+      } catch {
+        // leave parsedCrimes empty if fetch fails
+      }
 
       setAmenities(parsedAmenities);
-      setCrimes(mockCrimes);
-
-      // 4. Compute scores
-      const counts = countAmenities(parsedAmenities, mockCrimes);
-      setScores(computeScores(counts));
+      setCrimes(parsedCrimes);
+      setScores(computeScores(countAmenities(parsedAmenities, parsedCrimes)));
+      setVibeResult(null);
+      setVibeExtractedTags([]);
+      setVibeMatchTags(new Set());
+      setVibeAmenities([]);
     } catch {
       setErrorMessage('Something went wrong. Please try again.');
     } finally {
@@ -175,6 +198,112 @@ export default function HomePage() {
     }
   }, []);
 
+  // ── Vibe search ──────────────────────────────────────────────────────────
+  const handleVibeSearch = useCallback(async (vibe: string) => {
+    if (!postcodeData) return;
+    setVibeLoading(true);
+    setVibeText(vibe);
+    setVibeResult(null);
+    setVibeExtractedTags([]);
+    setRightTab('vibe');
+
+    try {
+      // Step 1: Extract OSM tags via LLM (API key is server-side only)
+      const tagsRes = await fetch('/api/vibe/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vibe }),
+      });
+      const tagsData = await tagsRes.json();
+      const extractedTags: string[] = tagsData.tags ?? [];
+      setVibeExtractedTags(extractedTags);
+
+      if (extractedTags.length === 0) {
+        setVibeLoading(false);
+        return;
+      }
+
+      // Step 2: POST to overpass-vibe with tags as JSON body (avoids URL-length limits)
+      const vibeRadius = Math.max(activeRadius, 1500);
+      const overpassRes = await fetch('/api/overpass-vibe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: postcodeData.latitude,
+          lon: postcodeData.longitude,
+          radius: vibeRadius,
+          tags: extractedTags,
+        }),
+      });
+
+      let rawFeatures: RawVibeFeature[] = [];
+      if (overpassRes.ok) {
+        const overpassData = await overpassRes.json();
+        rawFeatures = (overpassData.elements ?? [])
+          .filter((el: OSMNode) => el._vibeTag)
+          .map((el: OSMNode) => {
+            const lat = el.lat ?? el.center?.lat ?? 0;
+            const lon = el.lon ?? el.center?.lon ?? 0;
+            const osm = OSM_TAG_MAP[el._vibeTag!];
+            return {
+              lat,
+              lon,
+              name: el.tags?.name ?? '',
+              osmKey: osm?.key ?? '',
+              osmValue: osm?.value ?? '',
+              vibeTag: el._vibeTag!,
+              distance: haversineDistance(
+                postcodeData.latitude,
+                postcodeData.longitude,
+                lat,
+                lon
+              ),
+            } satisfies RawVibeFeature;
+          });
+      }
+
+      // Step 3: Score
+      const tagResults = buildTagResults(extractedTags, rawFeatures);
+      const score = computeVibeScore(tagResults);
+      const missingTags = tagResults.filter((r) => !r.found).map((r) => r.tag);
+
+      // Step 4: Pivot suggestions (LLM or rule-based fallback)
+      let pivotSuggestions: string[] = [];
+      if (missingTags.length > 0) {
+        try {
+          const pivotRes = await fetch('/api/vibe/pivot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vibe, tagResults }),
+          });
+          const pivotData = await pivotRes.json();
+          pivotSuggestions = pivotData.suggestions ?? [];
+        } catch {
+          pivotSuggestions = ruleBasedPivots(missingTags, tagResults);
+        }
+      }
+
+      setVibeResult({
+        score,
+        label: '',
+        requestedTags: extractedTags,
+        tagResults,
+        missingTags,
+        pivotSuggestions,
+      });
+
+      setVibeMatchTags(
+        new Set(tagResults.filter((r) => r.found).map((r) => r.osmValue))
+      );
+      setVibeAmenities(rawFeatures);
+    } catch (err) {
+      console.error('Vibe search error:', err);
+    } finally {
+      setVibeLoading(false);
+    }
+  }, [postcodeData, activeRadius]);
+
+  // ── Derived state ────────────────────────────────────────────────────────
   const mapCenter: [number, number] | null = postcodeData
     ? [postcodeData.latitude, postcodeData.longitude]
     : null;
@@ -190,13 +319,13 @@ export default function HomePage() {
     return generateInsights(countAmenities(amenities, crimes));
   }, [scores, amenities, crimes]);
 
-  const nearbyHighlights = useMemo(() => {
-    return amenities
+  const nearbyHighlights = useMemo(() =>
+    amenities
       .filter((a) => a.category === 'amenity')
       .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
       .slice(0, 3)
-      .map((a) => ({ name: a.name || a.type, type: a.type, distance: a.distance ?? 0 }));
-  }, [amenities]);
+      .map((a) => ({ name: a.name || a.type, type: a.type, distance: a.distance ?? 0 }))
+  , [amenities]);
 
   const nearestStation = useMemo(() => {
     const stations = amenities.filter((a) => a.type === 'station' || a.type === 'subway');
@@ -206,49 +335,49 @@ export default function HomePage() {
   }, [amenities]);
 
   return (
-    <div
-      className={`h-screen flex flex-col overflow-hidden ${isDark ? '' : 'light'}`}
-      style={{ background: 'var(--bg-primary)' }}
-    >
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
       <div className="flex flex-1 overflow-hidden">
 
-        {/* Left sidebar */}
+        {/* ── Left sidebar ─────────────────────────────────────── */}
         <aside
           className="w-80 shrink-0 flex flex-col overflow-hidden border-r"
           style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
         >
+          {/* Header */}
           <div
-            className="flex items-center justify-between px-5 py-4 border-b"
+            className="flex items-center px-5 py-4 border-b shrink-0"
             style={{ borderColor: 'var(--border)' }}
           >
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(59,130,246,0.15)' }}>
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: 'rgba(59,130,246,0.1)' }}
+              >
                 <MapPin size={16} style={{ color: '#3B82F6' }} />
               </div>
               <div>
-                <span className="text-base font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>LAIT</span>
-                <span className="text-xs ml-1.5" style={{ color: 'var(--text-muted)' }}>Local Intelligence</span>
+                <span className="text-base font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+                  LAIT
+                </span>
+                <span className="text-xs ml-1.5" style={{ color: 'var(--text-muted)' }}>
+                  Local Intelligence
+                </span>
               </div>
             </div>
-            <button
-              onClick={() => setIsDark((v) => !v)}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all hover:opacity-80"
-              style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-              aria-label="Toggle dark mode"
-            >
-              {isDark
-                ? <Sun size={14} style={{ color: 'var(--text-secondary)' }} />
-                : <Moon size={14} style={{ color: 'var(--text-secondary)' }} />}
-            </button>
           </div>
 
+          {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             <PostcodeSearch onSearch={handleSearch} isLoading={isLoading} />
 
             {errorMessage && (
               <div
                 className="px-3 py-2.5 rounded-xl text-xs"
-                style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444' }}
+                style={{
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.25)',
+                  color: '#DC2626',
+                }}
               >
                 {errorMessage}
               </div>
@@ -256,10 +385,15 @@ export default function HomePage() {
 
             <AreaHeader postcodeData={postcodeData} />
             <ScorePanel scores={scores} isLoading={isLoading} />
+            <VibeSearch
+              hasPostcode={!!postcodeData}
+              isLoading={vibeLoading}
+              onSearch={handleVibeSearch}
+            />
           </div>
         </aside>
 
-        {/* Map */}
+        {/* ── Map ──────────────────────────────────────────────── */}
         <main className="flex-1 relative overflow-hidden">
           <MapView
             center={mapCenter}
@@ -269,30 +403,67 @@ export default function HomePage() {
             filterCounts={filterCounts}
             onFilterToggle={handleFilterToggle}
             overallScore={scores?.overall ?? null}
-            isDark={isDark}
             radius={activeRadius}
             isOutcode={postcodeData?.isOutcode ?? false}
+            vibeMatchTags={vibeMatchTags}
+            vibeAmenities={vibeAmenities}
           />
         </main>
 
-        {/* Right panel */}
+        {/* ── Right panel ──────────────────────────────────────── */}
         <aside
           className="w-72 shrink-0 flex flex-col overflow-hidden border-l"
           style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
         >
-          <div
-            className="flex items-center px-4 py-4 border-b shrink-0"
-            style={{ borderColor: 'var(--border)' }}
-          >
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Area Insights</h2>
+          {/* Tab bar */}
+          <div className="flex shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
+            {(['insights', 'vibe'] as RightTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setRightTab(tab)}
+                className="flex-1 py-3 text-xs font-semibold transition-all relative"
+                style={{
+                  color: rightTab === tab ? 'var(--text-primary)' : 'var(--text-muted)',
+                  background: rightTab === tab ? 'var(--bg-tertiary)' : 'transparent',
+                }}
+              >
+                {tab === 'insights' ? 'Area Insights' : (
+                  <span className="flex items-center justify-center gap-1.5">
+                    Vibe Match
+                    {(vibeResult || vibeLoading) && (
+                      <span
+                        className="w-1.5 h-1.5 rounded-full inline-block"
+                        style={{ background: vibeLoading ? '#F59E0B' : '#8B5CF6' }}
+                      />
+                    )}
+                  </span>
+                )}
+                {rightTab === tab && (
+                  <div
+                    className="absolute bottom-0 left-0 right-0 h-0.5"
+                    style={{ background: tab === 'vibe' ? '#8B5CF6' : '#3B82F6' }}
+                  />
+                )}
+              </button>
+            ))}
           </div>
+
           <div className="flex-1 overflow-y-auto px-4 py-4">
-            <InsightsPanel
-              insights={insights}
-              nearbyHighlights={nearbyHighlights}
-              nearestStation={nearestStation}
-              isLoading={isLoading}
-            />
+            {rightTab === 'insights' ? (
+              <InsightsPanel
+                insights={insights}
+                nearbyHighlights={nearbyHighlights}
+                nearestStation={nearestStation}
+                isLoading={isLoading}
+              />
+            ) : (
+              <VibeResultsPanel
+                result={vibeResult}
+                isLoading={vibeLoading}
+                tags={vibeExtractedTags}
+                vibe={vibeText}
+              />
+            )}
           </div>
         </aside>
       </div>

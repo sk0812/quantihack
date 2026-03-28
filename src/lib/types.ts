@@ -101,3 +101,15 @@ export interface NearbyHighlight {
 export interface OverpassResponse {
   elements: OSMNode[];
 }
+
+// Vibe feature: an LLM-matched amenity point
+export interface VibeAmenityPoint {
+  id: number;
+  lat: number;
+  lon: number;
+  name: string;
+  osmKey: string;
+  osmValue: string;
+  distance?: number;
+  isVibeMatch: true;
+}

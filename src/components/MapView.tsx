@@ -5,13 +5,13 @@ import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AmenityPoint, CrimePoint, FilterState } from '@/lib/types';
+import type { RawVibeFeature } from '@/lib/vibeScoring';
 import { TILE_LAYERS, DEFAULT_CENTER, DEFAULT_ZOOM, SEARCH_ZOOM, OUTCODE_ZOOM } from '@/lib/constants';
 import { getScoreColor } from '@/lib/utils';
 import FilterBar from './FilterBar';
 import RadiusOverlay from './RadiusOverlay';
 import MarkerLayer from './MarkerLayer';
 
-// Fix Leaflet default icons in Next.js
 if (typeof window !== 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -36,8 +36,7 @@ function MapFly({ center, isOutcode }: MapFlyProps) {
     const key = center.join(',');
     if (key === prevCenter.current) return;
     prevCenter.current = key;
-    const zoom = isOutcode ? OUTCODE_ZOOM : SEARCH_ZOOM;
-    map.flyTo(center, zoom, { duration: 1.5, easeLinearity: 0.4 });
+    map.flyTo(center, isOutcode ? OUTCODE_ZOOM : SEARCH_ZOOM, { duration: 1.5, easeLinearity: 0.4 });
   }, [center, map, isOutcode]);
 
   return null;
@@ -51,9 +50,10 @@ interface MapViewProps {
   filterCounts: { transport: number; amenity: number; safety: number };
   onFilterToggle: (key: keyof FilterState) => void;
   overallScore: number | null;
-  isDark: boolean;
   radius: number;
   isOutcode: boolean;
+  vibeMatchTags?: Set<string>;
+  vibeAmenities?: RawVibeFeature[];
 }
 
 export default function MapView({
@@ -64,12 +64,13 @@ export default function MapView({
   filterCounts,
   onFilterToggle,
   overallScore,
-  isDark,
   radius,
   isOutcode,
+  vibeMatchTags,
+  vibeAmenities,
 }: MapViewProps) {
-  const tileLayer = isDark ? TILE_LAYERS.dark : TILE_LAYERS.light;
   const scoreColor = overallScore !== null ? getScoreColor(overallScore) : '#3B82F6';
+  const tileLayer = TILE_LAYERS.light; // always light mode
 
   return (
     <div className="relative w-full h-full">
@@ -89,7 +90,14 @@ export default function MapView({
         {center && (
           <>
             <RadiusOverlay center={center} color={scoreColor} radius={radius} />
-            <MarkerLayer amenities={amenities} crimes={crimes} filters={filters} center={center} />
+            <MarkerLayer
+              amenities={amenities}
+              crimes={crimes}
+              filters={filters}
+              center={center}
+              vibeMatchTags={vibeMatchTags}
+              vibeAmenities={vibeAmenities}
+            />
           </>
         )}
       </MapContainer>
@@ -99,10 +107,10 @@ export default function MapView({
         <div
           className="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] px-3 py-2 rounded-2xl"
           style={{
-            background: 'rgba(15, 17, 23, 0.85)',
+            background: 'rgba(255,255,255,0.92)',
             backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+            border: '1px solid rgba(0,0,0,0.08)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
           }}
         >
           <FilterBar filters={filters} counts={filterCounts} onToggle={onFilterToggle} />
@@ -115,14 +123,15 @@ export default function MapView({
           <div
             className="flex flex-col items-center gap-3 px-6 py-5 rounded-2xl"
             style={{
-              background: 'rgba(15, 17, 23, 0.85)',
+              background: 'rgba(255,255,255,0.95)',
               backdropFilter: 'blur(12px)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              border: '1px solid rgba(0,0,0,0.08)',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.1)',
             }}
           >
             <div
               className="w-12 h-12 rounded-full flex items-center justify-center"
-              style={{ background: 'rgba(59,130,246,0.15)' }}
+              style={{ background: 'rgba(59,130,246,0.1)' }}
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                 <path
@@ -133,10 +142,10 @@ export default function MapView({
               </svg>
             </div>
             <div className="text-center">
-              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              <p className="text-sm font-semibold" style={{ color: '#111827' }}>
                 Enter a postcode to explore
               </p>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>
                 Try a full postcode (SW1A 1AA) or district code (HA6)
               </p>
             </div>

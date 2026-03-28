@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+// Allow up to 60s for this route — Overpass can be slow
+export const maxDuration = 60;
+
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+];
+
+// Simple in-memory cache: avoids hammering Overpass and hitting rate limits
+const cache = new Map<string, { data: unknown; ts: number }>();
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function cacheKey(lat: string, lon: string, radius: string) {
+  // Round to 3dp so nearby searches reuse the same result
+  return `${parseFloat(lat).toFixed(3)},${parseFloat(lon).toFixed(3)},${radius}`;
+}
 
 export async function GET(request: NextRequest) {
   const lat = request.nextUrl.searchParams.get('lat');
@@ -11,9 +26,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing lat/lon' }, { status: 400 });
   }
 
+  // Serve from cache if fresh
+  const key = cacheKey(lat, lon, radius);
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
+  }
+
   const r = radius;
   const query = `
-[out:json][timeout:25];
+[out:json][timeout:50];
 (
   node["amenity"="cafe"](around:${r},${lat},${lon});
   node["amenity"="restaurant"](around:${r},${lat},${lon});
@@ -38,32 +60,34 @@ export async function GET(request: NextRequest) {
   node["railway"="tram_stop"](around:${r},${lat},${lon});
   node["highway"="bus_stop"](around:${r},${lat},${lon});
 );
-out center;
+out center tags;
 `;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+  // Try each mirror in turn
+  for (const mirrorUrl of OVERPASS_MIRRORS) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 50000);
 
-  try {
-    const response = await fetch(OVERPASS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
+    try {
+      const response = await fetch(mirrorUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
 
-    if (!response.ok) {
-      return NextResponse.json({ error: 'Overpass API error' }, { status: 500 });
+      if (!response.ok) continue; // try next mirror
+
+      const data = await response.json();
+      cache.set(key, { data, ts: Date.now() });
+      return NextResponse.json(data);
+    } catch (err) {
+      clearTimeout(timeout);
+      // Try next mirror on abort or network error
+      continue;
     }
-
-    const data = await response.json();
-    return NextResponse.json(data);
-  } catch (err) {
-    clearTimeout(timeout);
-    if (err instanceof Error && err.name === 'AbortError') {
-      return NextResponse.json({ error: 'Overpass timeout' }, { status: 504 });
-    }
-    return NextResponse.json({ error: 'Failed to fetch OSM data' }, { status: 500 });
   }
+
+  return NextResponse.json({ error: 'All Overpass mirrors failed', elements: [] }, { status: 504 });
 }

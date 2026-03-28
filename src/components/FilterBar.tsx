@@ -48,10 +48,9 @@ export default function FilterBar({ filters, counts, onToggle }: FilterBarProps)
             onClick={() => onToggle(key)}
             className="filter-pill flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
             style={{
-              background: active ? bg : 'rgba(15,17,23,0.7)',
-              border: `1px solid ${active ? border : 'rgba(255,255,255,0.1)'}`,
-              color: active ? color : 'rgba(255,255,255,0.4)',
-              backdropFilter: 'blur(8px)',
+              background: active ? bg : 'rgba(0,0,0,0.04)',
+              border: `1px solid ${active ? border : 'rgba(0,0,0,0.1)'}`,
+              color: active ? color : '#9ca3af',
             }}
             aria-pressed={active}
             aria-label={`Toggle ${label} markers`}
@@ -62,8 +61,8 @@ export default function FilterBar({ filters, counts, onToggle }: FilterBarProps)
               <span
                 className="px-1.5 py-0.5 rounded-full text-xs font-bold leading-none"
                 style={{
-                  background: active ? color + '30' : 'rgba(255,255,255,0.08)',
-                  color: active ? color : 'rgba(255,255,255,0.3)',
+                  background: active ? color + '20' : 'rgba(0,0,0,0.06)',
+                  color: active ? color : '#9ca3af',
                   fontSize: '10px',
                 }}
               >
