@@ -84,12 +84,14 @@ export interface FilterState {
   transport: boolean;
   amenity: boolean;
   safety: boolean;
+  gentrification: boolean;
 }
 
 export interface MarkerCounts {
   transport: number;
   amenity: number;
   safety: number;
+  gentrification: number;
 }
 
 export interface NearbyHighlight {

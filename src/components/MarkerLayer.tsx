@@ -8,6 +8,7 @@ import { formatDistance } from '@/lib/utils';
 import { COLORS } from '@/lib/constants';
 import type { RawVibeFeature } from '@/lib/vibeScoring';
 import { OSM_TAG_MAP } from '@/lib/osmTagMap';
+import type { GentrificationPoint } from '@/lib/gentrification';
 
 interface MarkerLayerProps {
   amenities: AmenityPoint[];
@@ -16,6 +17,7 @@ interface MarkerLayerProps {
   center: [number, number];
   vibeMatchTags?: Set<string>;
   vibeAmenities?: RawVibeFeature[];
+  gentrificationPoints?: GentrificationPoint[];
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -56,6 +58,7 @@ export default function MarkerLayer({
   center,
   vibeMatchTags,
   vibeAmenities,
+  gentrificationPoints,
 }: MarkerLayerProps) {
   const map = useMap();
   const layerRef = useRef<L.LayerGroup | null>(null);
@@ -179,10 +182,44 @@ export default function MarkerLayer({
       });
     }
 
+    // ── Gentrification markers: gold (lifestyle) + grey (legacy) ──
+    if (filters.gentrification && gentrificationPoints && gentrificationPoints.length > 0) {
+      gentrificationPoints.forEach((point, idx) => {
+        const isLifestyle = point.subtype === 'lifestyle';
+        const color = isLifestyle ? '#EAB308' : '#6B7280';
+        const borderColor = isLifestyle ? '#ffffff' : '#ffffff';
+        const label = isLifestyle ? 'Lifestyle' : 'Legacy';
+
+        const marker = L.circleMarker([point.lat, point.lon], {
+          radius: 7,
+          fillColor: color,
+          color: borderColor,
+          weight: 1.5,
+          fillOpacity: 0.85,
+        });
+
+        const displayName = point.name || point.categoryLabel;
+        marker.bindPopup(
+          `<div style="min-width:150px">
+            <div style="font-weight:600;font-size:13px;margin-bottom:2px">${displayName}</div>
+            <div style="color:#9ba3c0;font-size:11px">${point.categoryLabel}</div>
+            <div style="display:inline-flex;align-items:center;gap:4px;background:${color}20;color:${color};font-size:10px;padding:2px 7px;border-radius:999px;margin-top:6px;border:1px solid ${color}40;font-weight:600">
+              ${isLifestyle ? '✦' : '◆'} ${label}
+            </div>
+          </div>`,
+          { closeButton: false }
+        );
+
+        setTimeout(() => {
+          if (layerRef.current) marker.addTo(layer);
+        }, (amenities.length + crimes.length) * 20 + idx * 15);
+      });
+    }
+
     return () => {
       if (layerRef.current) layerRef.current.clearLayers();
     };
-  }, [map, amenities, crimes, filters, center, vibeMatchTags, vibeAmenities, isVibeMode]);
+  }, [map, amenities, crimes, filters, center, vibeMatchTags, vibeAmenities, isVibeMode, gentrificationPoints]);
 
   return null;
 }

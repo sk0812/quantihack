@@ -66,7 +66,7 @@ export default function InsightsPanel({
   isLoading,
 }: InsightsPanelProps) {
   return (
-    <div className="h-full overflow-y-auto space-y-4 pr-1">
+    <div className="space-y-4 pb-2">
       {/* Insights */}
       <div
         className="rounded-xl p-4"

@@ -6,6 +6,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AmenityPoint, CrimePoint, FilterState } from '@/lib/types';
 import type { RawVibeFeature } from '@/lib/vibeScoring';
+import type { GentrificationPoint } from '@/lib/gentrification';
 import { TILE_LAYERS, DEFAULT_CENTER, DEFAULT_ZOOM, SEARCH_ZOOM, OUTCODE_ZOOM } from '@/lib/constants';
 import { getScoreColor } from '@/lib/utils';
 import FilterBar from './FilterBar';
@@ -47,13 +48,14 @@ interface MapViewProps {
   amenities: AmenityPoint[];
   crimes: CrimePoint[];
   filters: FilterState;
-  filterCounts: { transport: number; amenity: number; safety: number };
+  filterCounts: { transport: number; amenity: number; safety: number; gentrification: number };
   onFilterToggle: (key: keyof FilterState) => void;
   overallScore: number | null;
   radius: number;
   isOutcode: boolean;
   vibeMatchTags?: Set<string>;
   vibeAmenities?: RawVibeFeature[];
+  gentrificationPoints?: GentrificationPoint[];
 }
 
 export default function MapView({
@@ -68,6 +70,7 @@ export default function MapView({
   isOutcode,
   vibeMatchTags,
   vibeAmenities,
+  gentrificationPoints,
 }: MapViewProps) {
   const scoreColor = overallScore !== null ? getScoreColor(overallScore) : '#3B82F6';
   const tileLayer = TILE_LAYERS.light; // always light mode
@@ -97,6 +100,7 @@ export default function MapView({
               center={center}
               vibeMatchTags={vibeMatchTags}
               vibeAmenities={vibeAmenities}
+              gentrificationPoints={gentrificationPoints}
             />
           </>
         )}

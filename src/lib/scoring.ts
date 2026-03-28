@@ -40,22 +40,29 @@ export function countAmenities(
   };
 }
 
-export function computeScores(counts: AmenityCounts): Scores {
+export function computeScores(counts: AmenityCounts, radiusMeters = 1000): Scores {
   const safety = clamp(10 - counts.crimeCount / 3, 0, 10);
 
+  // Density factor: normalise to a 1km-radius baseline so outcode (3km)
+  // scores reflect amenities-per-km² rather than raw totals.
+  // factor = (1000 / radius)²  →  1.0 at 1km, ~0.11 at 3km
+  const d = Math.pow(1000 / radiusMeters, 2);
+
   const transport = clamp(
-    counts.stationCount * 2.5 + counts.busStopCount * 0.5,
+    d * (counts.stationCount * 2.5 + counts.busStopCount * 0.5),
     0,
     10
   );
 
   const lifestyle = clamp(
-    counts.cafeCount * 1.0 +
+    d * (
+      counts.cafeCount * 1.0 +
       counts.gymCount * 1.5 +
       counts.supermarketCount * 1.2 +
       counts.parkCount * 1.5 +
       counts.pubCount * 0.8 +
-      counts.restaurantCount * 0.8,
+      counts.restaurantCount * 0.8
+    ),
     0,
     10
   );
