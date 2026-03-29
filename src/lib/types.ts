@@ -85,6 +85,7 @@ export interface FilterState {
   amenity: boolean;
   safety: boolean;
   gentrification: boolean;
+  biophilia: boolean;
 }
 
 export interface MarkerCounts {
@@ -92,6 +93,7 @@ export interface MarkerCounts {
   amenity: number;
   safety: number;
   gentrification: number;
+  biophilia: number;
 }
 
 export interface NearbyHighlight {

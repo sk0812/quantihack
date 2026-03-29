@@ -1,6 +1,6 @@
 'use client';
 
-import { Train, UtensilsCrossed, Shield, Flame } from 'lucide-react';
+import { Train, UtensilsCrossed, Shield, Flame, Leaf } from 'lucide-react';
 import { FilterState, MarkerCounts } from '@/lib/types';
 
 interface FilterBarProps {
@@ -41,6 +41,14 @@ const FILTER_CONFIG = [
     color: '#EAB308',
     bg: 'rgba(234,179,8,0.2)',
     border: 'rgba(234,179,8,0.4)',
+  },
+  {
+    key: 'biophilia' as const,
+    label: 'Zen',
+    icon: Leaf,
+    color: '#10B981',
+    bg: 'rgba(16,185,129,0.2)',
+    border: 'rgba(16,185,129,0.4)',
   },
 ];
 

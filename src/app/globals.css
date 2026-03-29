@@ -120,3 +120,32 @@ body {
 .leaflet-tooltip.vibe-label::before {
   border-top-color: rgba(139, 92, 246, 0.35);
 }
+
+/* Home price badge DivIcon */
+.home-marker-icon {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.home-price-badge {
+  background: white;
+  border: 2px solid #10B981;
+  border-radius: 8px;
+  padding: 3px 8px 3px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: #10B981;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  position: relative;
+}
+.home-price-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16,185,129,0.3);
+}

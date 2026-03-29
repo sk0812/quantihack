@@ -10,6 +10,7 @@ import InsightsPanel from '@/components/InsightsPanel';
 import VibeSearch from '@/components/VibeSearch';
 import VibeResultsPanel from '@/components/VibeResultsPanel';
 import GentrificationGauge from '@/components/GentrificationGauge';
+import PropertyFinder from '@/components/PropertyFinder';
 import { PostcodeData, AmenityPoint, CrimePoint, FilterState, Scores } from '@/lib/types';
 import { countAmenities, computeScores } from '@/lib/scoring';
 import { generateInsights } from '@/lib/insights';
@@ -17,6 +18,8 @@ import { haversineDistance } from '@/lib/utils';
 import { RADIUS_METERS, OUTCODE_RADIUS_METERS } from '@/lib/constants';
 import { OSM_TAG_MAP } from '@/lib/osmTagMap';
 import type { GentrificationResult } from '@/lib/gentrification';
+import type { BiophiliaResult } from '@/lib/biophilia';
+import BiophiliaPanel from '@/components/BiophiliaPanel';
 import {
   buildTagResults,
   computeVibeScore,
@@ -102,7 +105,7 @@ function parseOSMAmenities(
   return results;
 }
 
-type RightTab = 'insights' | 'vibe';
+type RightTab = 'insights' | 'vibe' | 'properties' | 'zen';
 
 export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -122,6 +125,10 @@ export default function HomePage() {
 
   const [gentrificationResult, setGentrificationResult] = useState<GentrificationResult | null>(null);
   const [gentrificationLoading, setGentrificationLoading] = useState(false);
+
+  const [biophiliaResult, setBiophiliaResult] = useState<BiophiliaResult | null>(null);
+  const [biophiliaLoading, setBiophiliaLoading] = useState(false);
+
   const [rightTab, setRightTab] = useState<RightTab>('insights');
 
   const [filters, setFilters] = useState<FilterState>({
@@ -129,6 +136,7 @@ export default function HomePage() {
     amenity: true,
     safety: true,
     gentrification: true,
+    biophilia: true,
   });
 
   const handleFilterToggle = useCallback((key: keyof FilterState) => {
@@ -207,8 +215,11 @@ export default function HomePage() {
       setVibeMatchTags(new Set());
       setVibeAmenities([]);
       setGentrificationResult(null);
+      setBiophiliaResult(null);
 
-      // Kick off gentrification fetch in the background (non-blocking)
+      // Kick off background fetches (non-blocking)
+      const outcode = pd.postcode.trim().toUpperCase().split(' ')[0];
+
       setGentrificationLoading(true);
       fetch(`/api/gentrification?lat=${pd.latitude}&lon=${pd.longitude}&radius=${radius}`)
         .then((r) => r.ok ? r.json() : null)
@@ -217,6 +228,16 @@ export default function HomePage() {
         })
         .catch(() => {})
         .finally(() => setGentrificationLoading(false));
+
+      setBiophiliaLoading(true);
+      fetch(`/api/biophilia?lat=${pd.latitude}&lon=${pd.longitude}&radius=${radius}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          if (data && data.score !== undefined) setBiophiliaResult(data);
+        })
+        .catch(() => {})
+        .finally(() => setBiophiliaLoading(false));
+
     } catch {
       setErrorMessage('Something went wrong. Please try again.');
     } finally {
@@ -339,7 +360,8 @@ export default function HomePage() {
     amenity: amenities.filter((a) => a.category === 'amenity').length,
     safety: crimes.length,
     gentrification: gentrificationResult?.points.length ?? 0,
-  }), [amenities, crimes, gentrificationResult]);
+    biophilia: biophiliaResult?.points.length ?? 0,
+  }), [amenities, crimes, gentrificationResult, biophiliaResult]);
 
   const insights = useMemo(() => {
     if (!scores) return [];
@@ -435,6 +457,7 @@ export default function HomePage() {
             vibeMatchTags={vibeMatchTags}
             vibeAmenities={vibeAmenities}
             gentrificationPoints={gentrificationResult?.points}
+            biophiliaPoints={biophiliaResult?.points}
           />
         </main>
 
@@ -445,39 +468,57 @@ export default function HomePage() {
         >
           {/* Tab bar */}
           <div className="flex shrink-0 border-b" style={{ borderColor: 'var(--border)' }}>
-            {(['insights', 'vibe'] as RightTab[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setRightTab(tab)}
-                className="flex-1 py-3 text-xs font-semibold transition-all relative"
-                style={{
-                  color: rightTab === tab ? 'var(--text-primary)' : 'var(--text-muted)',
-                  background: rightTab === tab ? 'var(--bg-tertiary)' : 'transparent',
-                }}
-              >
-                {tab === 'insights' ? 'Area Insights' : (
-                  <span className="flex items-center justify-center gap-1.5">
-                    Vibe Match
+            {(['insights', 'vibe', 'properties', 'zen'] as RightTab[]).map((tab) => {
+              const TAB_LABELS: Record<RightTab, React.ReactNode> = {
+                insights: 'Insights',
+                vibe: (
+                  <span className="flex items-center justify-center gap-1">
+                    Vibe
                     {(vibeResult || vibeLoading) && (
-                      <span
-                        className="w-1.5 h-1.5 rounded-full inline-block"
-                        style={{ background: vibeLoading ? '#F59E0B' : '#8B5CF6' }}
-                      />
+                      <span className="w-1.5 h-1.5 rounded-full inline-block"
+                        style={{ background: vibeLoading ? '#F59E0B' : '#8B5CF6' }} />
                     )}
                   </span>
-                )}
-                {rightTab === tab && (
-                  <div
-                    className="absolute bottom-0 left-0 right-0 h-0.5"
-                    style={{ background: tab === 'vibe' ? '#8B5CF6' : '#3B82F6' }}
-                  />
-                )}
-              </button>
-            ))}
+                ),
+                properties: 'Homes',
+                zen: (
+                  <span className="flex items-center justify-center gap-1">
+                    Zen
+                    {(biophiliaResult || biophiliaLoading) && (
+                      <span className="w-1.5 h-1.5 rounded-full inline-block"
+                        style={{ background: biophiliaLoading ? '#F59E0B' : '#10B981' }} />
+                    )}
+                  </span>
+                ),
+              };
+              const TAB_COLORS: Record<RightTab, string> = {
+                insights: '#3B82F6',
+                vibe: '#8B5CF6',
+                properties: '#10B981',
+                zen: '#10B981',
+              };
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setRightTab(tab)}
+                  className="flex-1 py-3 text-xs font-semibold transition-all relative"
+                  style={{
+                    color: rightTab === tab ? 'var(--text-primary)' : 'var(--text-muted)',
+                    background: rightTab === tab ? 'var(--bg-tertiary)' : 'transparent',
+                  }}
+                >
+                  {TAB_LABELS[tab]}
+                  {rightTab === tab && (
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5"
+                      style={{ background: TAB_COLORS[tab] }} />
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            {rightTab === 'insights' ? (
+            {rightTab === 'insights' && (
               <>
                 <InsightsPanel
                   insights={insights}
@@ -490,13 +531,44 @@ export default function HomePage() {
                   isLoading={gentrificationLoading}
                 />
               </>
-            ) : (
+            )}
+            {rightTab === 'vibe' && (
               <VibeResultsPanel
                 result={vibeResult}
                 isLoading={vibeLoading}
                 tags={vibeExtractedTags}
                 vibe={vibeText}
               />
+            )}
+            {rightTab === 'properties' && (
+              postcodeData ? (
+                <PropertyFinder
+                  outcode={postcodeData.postcode.trim().toUpperCase().split(' ')[0]}
+                  gentrificationScore={gentrificationResult?.score ?? null}
+                  lifestyleScore={scores?.lifestyle ?? null}
+                  transportScore={scores?.transport ?? null}
+                />
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Search a postcode to find properties
+                  </p>
+                </div>
+              )
+            )}
+            {rightTab === 'zen' && (
+              postcodeData ? (
+                <BiophiliaPanel
+                  result={biophiliaResult}
+                  isLoading={biophiliaLoading}
+                />
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Search a postcode to see the Biophilic Restorative Score
+                  </p>
+                </div>
+              )
             )}
           </div>
         </aside>
